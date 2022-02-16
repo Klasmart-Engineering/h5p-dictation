@@ -265,6 +265,17 @@ class Dictation extends H5P.Question {
       this.addButton('check-answer', this.params.l10n.checkAnswer, () => {
         this.showEvaluation();
         this.isAnswered = true;
+
+        // Emit screenshot
+        setTimeout(() => {
+          if (H5P && H5P.KLScreenshot) {
+            H5P.KLScreenshot.takeScreenshot(
+              this,
+              this.content.closest('.h5p-container')
+            );
+          }
+        }, 500); // Give result time to appear
+
         this.triggerXAPIAnswered();
         if (this.params.behaviour.enableRetry && !this.isPassed()) {
           this.showButton('try-again');

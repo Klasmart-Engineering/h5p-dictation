@@ -274,7 +274,7 @@ class Dictation extends H5P.Question {
               this.content.closest('.h5p-container')
             );
           }
-        }, 500); // Give result time to appear
+        }, 1000); // Give result time to appear
 
         this.triggerXAPIAnswered();
         if (this.params.behaviour.enableRetry && !this.isPassed()) {

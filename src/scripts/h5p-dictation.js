@@ -95,6 +95,21 @@ class Dictation extends H5P.Question {
     this.contentId = contentId;
     this.contentData = contentData || {};
 
+    this.previousState = {};
+    if (Array.isArray(contentData.previousState)) {
+      this.previousState = {
+        viewState: 'task',
+        sentences: contentData.previousState
+      };
+    }
+    else {
+      this.previousState = Util.extend({
+        viewState: 'task'
+      }, contentData.previousState || {});
+    }
+
+    this.viewState = this.previousState.viewState;
+
     this.contextId = 0; // Best guess, no interaction.
 
     this.sentences = [];
@@ -130,8 +145,8 @@ class Dictation extends H5P.Question {
     this.previousSentenceStates = [...Array(this.params.sentences.length)];
 
     // Retrieve previousState
-    if (this.contentData.previousState && Array.isArray(this.contentData.previousState)) {
-      this.contentData.previousState.forEach((state, index) => {
+    if (this.contentData.previousState && Array.isArray(this.contentData.previousState.sentences)) {
+      this.contentData.previousState.sentences.forEach((state, index) => {
         if (this.previousSentenceStates.length > index) {
           state.index = state.index ?? index; // Accept previous states from former versions
           this.previousSentenceStates[index] = state;
@@ -247,6 +262,15 @@ class Dictation extends H5P.Question {
         // Register Buttons
         this.addButtons();
       }
+
+      this.setViewState(this.previousState && this.previousState.viewState || 'task');
+      if (this.viewState === 'results') {
+        this.handleCheckAnswer({ skipXAPI: true });
+      }
+      else if (this.viewState === 'solutions') {
+        this.handleCheckAnswer({ skipXAPI: true });
+        this.handleShowSolutions();
+      }
     };
 
     /**
@@ -255,31 +279,14 @@ class Dictation extends H5P.Question {
     this.addButtons = () => {
       // Show solution button
       this.addButton('show-solution', this.params.l10n.showSolution, () => {
-        this.showSolutions();
-        this.hideButton('show-solution');
+        this.handleShowSolutions();
       }, false, {
         'aria-label': this.params.a11y.showSolution
       }, {});
 
       // Check answer button
       this.addButton('check-answer', this.params.l10n.checkAnswer, () => {
-        this.showEvaluation();
-        this.isAnswered = true;
-
-        // Emit screenshot
-        setTimeout(() => {
-          if (H5P && H5P.KLScreenshot) {
-            H5P.KLScreenshot.takeScreenshot(
-              this,
-              this.content.closest('.h5p-container')
-            );
-          }
-        }, 1000); // Give result time to appear
-
-        this.triggerXAPIAnswered();
-        if (this.params.behaviour.enableRetry && !this.isPassed()) {
-          this.showButton('try-again');
-        }
+        this.handleCheckAnswer();
       }, true, {
         'aria-label': this.params.a11y.check
       }, {});
@@ -291,6 +298,47 @@ class Dictation extends H5P.Question {
       }, false, {
         'aria-label': this.params.a11y.retry
       }, {});
+    };
+
+    /**
+     * Handle the evaluation.
+     * @param {object} [params = {}] Parameters.
+     * @param {boolean} [params.skipXAPI = false] If true, don't trigger xAPI.
+     */
+    this.handleCheckAnswer = (params = {}) => {
+      this.showEvaluation();
+      this.setViewState('results');
+      this.isAnswered = true;
+
+      // Emit screenshot
+      setTimeout(() => {
+        if (H5P && H5P.KLScreenshot) {
+          H5P.KLScreenshot.takeScreenshot(
+            this,
+            this.content.closest('.h5p-container')
+          );
+        }
+      }, 1000); // Give result time to appear
+
+      if (!params.skipXAPI) {
+        this.triggerXAPIAnswered();
+      }
+
+      if (this.params.behaviour.enableRetry && !this.isPassed()) {
+        this.showButton('try-again');
+      }
+    };
+
+    /**
+     * Handle showing solutions
+     */
+    this.handleShowSolutions = () => {
+      // Not using a function argument to not change contract
+      this.internalShowSolutionsCall = true;
+      this.showSolutions();
+      this.internalShowSolutionsCall = false;
+
+      this.hideButton('show-solution');
     };
 
     /**
@@ -440,7 +488,9 @@ class Dictation extends H5P.Question {
       );
 
       if (this.params.behaviour.enableSolutionOnCheck) {
+        this.internalShowSolutionsCall = true;
         this.showSolutions();
+        this.internalShowSolutionsCall = false;
       }
 
       this.trigger('resize');
@@ -483,12 +533,25 @@ class Dictation extends H5P.Question {
      * @see contract at {@link https://h5p.org/documentation/developers/contracts#guides-header-4}
      */
     this.showSolutions = () => {
+      if (!this.internalShowSolutionsCall) {
+        this.handleCheckAnswer({ skipXAPI: true });
+      }
+
+      this.setViewState('solutions');
+
       this.sentences.forEach((sentence, index) => {
         sentence.showSolution(this.computedResults[index]);
       });
 
       // Focus first solution
       this.sentences[0].focusSolution();
+
+      // Handle outside call
+      if (!this.internalShowSolutionsCall) {
+        this.hideButton('check-answer');
+        this.hideButton('show-solution');
+        this.hideButton('try-again');
+      }
 
       this.trigger('resize');
     };
@@ -498,6 +561,8 @@ class Dictation extends H5P.Question {
      * @see contract at {@link https://h5p.org/documentation/developers/contracts#guides-header-5}
      */
     this.resetTask = () => {
+      this.setViewState('task');
+
       // Shuffle sentences if they should be
       if (this.params.behaviour.shuffleSentences === 'onRetry') {
         this.shuffleSentences();
@@ -685,7 +750,10 @@ class Dictation extends H5P.Question {
      * @return {Object} Current state.
      */
     this.getCurrentState = () => {
-      return this.sentences.map(sentence => sentence.getCurrentState());
+      return {
+        viewState: this.viewState,
+        sentences: this.sentences.map(sentence => sentence.getCurrentState())
+      };
     };
 
     /**
@@ -697,7 +765,7 @@ class Dictation extends H5P.Question {
       return {
         type: 'sentence',
         value: this.contextId + 1
-      }
+      };
     };
 
     /**
@@ -719,11 +787,29 @@ class Dictation extends H5P.Question {
      * @return {string} Description.
      */
     this.getDescription = () => this.params.taskDescription || Dictation.DEFAULT_DESCRIPTION;
+
+    /**
+     * Set view state.
+     * @param {string} state View state.
+     */
+    this.setViewState = (state) => {
+      if (Dictation.VIEW_STATES.indexOf(state) === -1) {
+        return;
+      }
+
+      // Kidsloop Live session storage will listen
+      this.trigger('kllStoreSessionState', undefined, { bubbles: true, external: true });
+
+      this.viewState = state;
+    };
   }
 }
 
 /** @constant {string} */
 Dictation.DEFAULT_DESCRIPTION = 'Dictation';
+
+/** @constant {string[]} view state names*/
+Dictation.VIEW_STATES = ['task', 'results', 'solutions'];
 
 /** @constant {string} */
 Dictation.XAPI_ALTERNATIVE_EXTENSION = 'https://h5p.org/x-api/alternatives';

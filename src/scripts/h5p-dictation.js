@@ -328,7 +328,7 @@ class Dictation extends H5P.Question {
         this.triggerXAPIAnswered();
       }
 
-      if (this.params.behaviour.enableRetry && !this.isPassed()) {
+      if (this.params.behaviour.enableRetry) {
         this.showButton('try-again');
       }
     };

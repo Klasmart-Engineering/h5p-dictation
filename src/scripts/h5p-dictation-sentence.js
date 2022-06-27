@@ -223,6 +223,14 @@ class Sentence {
   }
 
   /**
+   * Get sentence id.
+   * @return {number} Index.
+   */
+  getId() {
+    return this.index;
+  }
+
+  /**
    * Get current text in InputField.
    * @return {string} Current text.
    */
@@ -298,11 +306,49 @@ class Sentence {
   }
 
   /**
-   * Get the maximum of possible mistakes.
+   * Get score for sentence.
+   * @return {number} Score for sentence.
+   */
+  getScore() {
+    const results = this.computeResults();
+
+    if (this.params.zeroMistakeMode) {
+      return Math.round(results.score.match + results.score.typo * (1 - this.params.typoFactor));
+    }
+
+    const mistakesTotal = results.score.added +
+      results.score.missing +
+      results.score.wrong +
+      results.score.typo * this.params.typoFactor;
+
+    // Number of mistakes shall not be higher than number of words.
+    const mistakesCapped = Math.min(mistakesTotal, this.getMaxScore());
+
+    return Math.round(this.getMaxScore() - mistakesCapped);
+  }
+
+  /**
+   * Get the maximum of possible mistakes = maxScore.
    * @return {number} Number of possible mistakes.
    */
-  getMaxMistakes() {
+  getMaxScore() {
     return this.mistakesMax;
+  }
+
+  /**
+   * Determine whether sentence was passed.
+   * @return {boolean} True, if sentence was passed, else false.
+   */
+  isPassed() {
+    return this.getScore() === this.getMaxScore();
+  }
+
+  /**
+   * Get title.
+   * @return {string} title.
+   */
+  getTitle() {
+    return `${this.params.a11y.sentence} ${this.getId() + 1}`;
   }
 
   /**
@@ -545,7 +591,7 @@ class Sentence {
         "total": Math.min(score[Sentence.TYPE_ADDED] +
           score[Sentence.TYPE_MISSING] +
           score[Sentence.TYPE_TYPO] +
-          score[Sentence.TYPE_WRONG], this.getMaxMistakes())
+          score[Sentence.TYPE_WRONG], this.getMaxScore())
       },
       "words": words
     };

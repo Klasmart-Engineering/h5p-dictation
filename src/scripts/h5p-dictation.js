@@ -155,7 +155,7 @@ class Dictation extends H5P.Question {
     }
 
     // Create sentence instances
-    this.params.sentences = this.params.sentences.forEach((sentence, index) => {
+    this.params.sentences.forEach((sentence, index) => {
       this.sentences.push(new Sentence(
         index,
         {
@@ -195,7 +195,7 @@ class Dictation extends H5P.Question {
 
     // Maximum number of possible mistakes for all sentences
     this.maxMistakes = this.sentences
-      .map(sentence => sentence.getMaxMistakes())
+      .map(sentence => sentence.getMaxScore())
       .reduce((a, b) => a + b, 0);
 
     this.mistakesCapped = 0;
@@ -643,6 +643,104 @@ class Dictation extends H5P.Question {
     };
 
     /**
+     * Build xAPI answer event.
+     * @return {H5P.XAPIEvent} XAPI answer event.
+     */
+    this.getXAPISentenceAnswerEvent = (sentence) => {
+      const computedResults = [sentence.computeResults()];
+
+      // We need to build the placeholders dynamically based on user input
+      const placeholders = computedResults.reduce((placeholder, result) => {
+        const description = sentence.getXAPIDescription();
+        const words = result.words
+          .map(() => {
+            return Dictation.FILL_IN_PLACEHOLDER;
+          })
+          .join(' '); // TODO: Use pattern to put punctuation right
+        return `${placeholder}${description}<p>${words}</p>`;
+      }, '');
+
+      const gapVariations = this.buildCorrectGapVariations(sentence.getId());
+
+      const name = {};
+      name[this.languageTag] = sentence.getTitle();
+      name['en-US'] = name[this.languageTag];
+
+      const description = {};
+      description[this.languageTag] = `${sentence.getTitle()}: ${placeholders}`;
+      description['en-US'] = description[this.languageTag];
+
+      const extensions = {};
+      extensions[Dictation.XAPI_CASE_SENSITIVITY] = true;
+      extensions[Dictation.XAPI_ALTERNATIVE_EXTENSION] = gapVariations;
+
+      const response = computedResults[0].words
+        .reduce((answers, word) => {
+          return answers.concat(word.answer || '');
+        }, [])
+        .join('[,]');
+
+      const fakeSubContentInstance = {
+        contentId: this.contentId,
+        subContentId: this.params.sentences[sentence.getId()].subContentId,
+        libraryInfo: {
+          versionedNameNoSpaces: `H5P.DictationSentence-${this.libraryInfo.majorVersion}.${this.libraryInfo.minorVersion}`
+        },
+        parent: this,
+        getTitle: () => {
+          return sentence.getTitle();
+        },
+        getScore: () => {
+          return sentence.getScore();
+        },
+        getMaxScore: () => {
+          return sentence.getMaxScore();
+        },
+        xAPIDefinition: {
+          interactionType: 'fill-in',
+          name: name,
+          correctResponsesPattern: this.buildxAPICRP(gapVariations.slice()),
+          type: 'http://adlnet.gov/expapi/activities/cmi.interaction',
+          description: description,
+          extensions: extensions
+        },
+        xAPIResult: {
+          response: response
+        },
+        activityStartTime: this.activityStartTime
+      };
+
+      const xAPIEvent = this.createXAPIEventTemplate('answered');
+
+      xAPIEvent.setContext(fakeSubContentInstance);
+
+      const context = xAPIEvent.getVerifiedStatementValue(['context']);
+      context.extensions = context.extensions || {};
+      context.extensions[Dictation.XAPI_REPORTING_VERSION_EXTENSION] = Dictation.XAPI_REPORTING_VERSION;
+
+      xAPIEvent.setObject(fakeSubContentInstance);
+      for (let prop in fakeSubContentInstance.xAPIDefinition) {
+        xAPIEvent.data.statement.object.definition[prop] = Util.extend(
+          fakeSubContentInstance.xAPIDefinition[prop],
+          xAPIEvent.data.statement.object.definition[prop]
+        );
+      }
+
+      xAPIEvent.setScoredResult(
+        fakeSubContentInstance.getScore(),
+        fakeSubContentInstance.getMaxScore(),
+        fakeSubContentInstance,
+        true,
+        fakeSubContentInstance.getScore() === fakeSubContentInstance.getMaxScore()
+      );
+      for (let prop in fakeSubContentInstance.xAPIResult) {
+        xAPIEvent.data.statement.result[prop] = fakeSubContentInstance.xAPIResult[prop];
+      }
+
+      return xAPIEvent;
+    };
+
+    /**
      * Create an xAPI event for Dictation.
      * @param {string} verb Short id of the verb we want to trigger.
      * @return {H5P.XAPIEvent} Event template.
@@ -700,8 +798,12 @@ class Dictation extends H5P.Question {
      * Build all correct gap variations.
      * @return {object[]} Correct gap variations.
      */
-    this.buildCorrectGapVariations = () => {
-      return this.computedResults.reduce((gaps, sentence) => {
+    this.buildCorrectGapVariations = (sentenceId) => {
+      const results = (typeof sentenceId === 'number') ?
+        [this.computedResults[sentenceId]] :
+        this.computedResults;
+
+      return results.reduce((gaps, sentence) => {
         return gaps.concat(
           sentence.words.map(word => {
             return word.solution ? word.solution.split('|') : [];

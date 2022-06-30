@@ -314,7 +314,11 @@ class Dictation extends H5P.Question {
       setTimeout(() => {
         if (H5P && H5P.KLScreenshot) {
           H5P.KLScreenshot.takeScreenshot(
-            this,
+            {
+              subContentId: this.params.sentences[this.params.sentences.length - 1].subContentId,
+              getTitle: this.getTitle,
+              trigger: this.trigger
+            },
             this.content.closest('.h5p-container')
           );
         }
@@ -601,6 +605,11 @@ class Dictation extends H5P.Question {
      * Trigger all necessary xAPI events after evaluation. Might become more.
      */
     this.triggerXAPIAnswered = () => {
+      // Trigger answered for every sentence's fake subcontent instance
+      this.sentences.forEach(sentence => {
+        this.trigger(this.getXAPISentenceAnswerEvent(sentence));
+      });
+
       this.trigger(this.getXAPIAnswerEvent());
     };
 
